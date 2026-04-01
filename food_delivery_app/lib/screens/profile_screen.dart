@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/app_providers.dart';
-import '../app_theme.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/cart/cart_bloc.dart';
+import '../blocs/location/location_bloc.dart';
+import '../utils/app_theme.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -9,27 +11,44 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<AuthProvider, LocationProvider>(
-      builder: (_, auth, loc, __) => SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              const SizedBox(height: 8),
-              _buildAvatar(auth),
-              const SizedBox(height: 24),
-              _buildLocationCard(loc),
-              const SizedBox(height: 16),
-              _buildMenuSection(context, auth, loc),
-              const SizedBox(height: 100),
-            ],
-          ),
-        ),
-      ),
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, authState) {
+        return BlocBuilder<LocationBloc, LocationState>(
+          builder: (context, locationState) {
+            return BlocBuilder<CartBloc, CartState>(
+              builder: (context, cartState) {
+                final user = authState is AuthAuthenticated ? authState.user : null;
+
+                return SafeArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 8),
+                        _buildAvatar(user),
+                        const SizedBox(height: 24),
+                        _buildLocationCard(locationState, cartState),
+                        const SizedBox(height: 16),
+                        _buildMenuSection(context, user),
+                        const SizedBox(height: 100),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
-  Widget _buildAvatar(AuthProvider auth) {
+  Widget _buildAvatar(user) {
+    final initial = user?.initials.isNotEmpty == true ? user!.initials[0] : '?';
+    final name = user?.name ?? 'Guest';
+    final email = user?.email ?? '';
+    final phone = user?.phone ?? '';
+
     return Column(
       children: [
         Stack(
@@ -54,9 +73,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  auth.userName.isNotEmpty
-                      ? auth.userName[0].toUpperCase()
-                      : '?',
+                  initial,
                   style: const TextStyle(
                     fontSize: 38,
                     fontWeight: FontWeight.w900,
@@ -82,7 +99,7 @@ class ProfileScreen extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          auth.userName.isEmpty ? 'User' : auth.userName,
+          name,
           style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w900,
@@ -91,17 +108,17 @@ class ProfileScreen extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          auth.userEmail,
+          email,
           style: const TextStyle(
             fontSize: 14,
             color: AppTheme.textSecondary,
             fontWeight: FontWeight.w500,
           ),
         ),
-        if (auth.userPhone.isNotEmpty) ...[
+        if (phone.isNotEmpty) ...[
           const SizedBox(height: 2),
           Text(
-            auth.userPhone,
+            phone,
             style: const TextStyle(
               fontSize: 13,
               color: AppTheme.textLight,
@@ -112,7 +129,13 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationCard(LocationProvider loc) {
+  Widget _buildLocationCard(LocationState loc, CartState cartState) {
+    final distanceText = loc.hasLocation ? loc.formattedDistance(19.0760, 72.8777) : '--';
+    final etaText = loc.hasLocation
+        ? '${loc.estimatedTime(19.0760, 72.8777)} min'
+        : '--';
+    final isFreeDelivery = cartState.subtotal > 500;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -142,14 +165,14 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 14),
           _locationRow(
             'Your Location',
-            loc.isLoadingLocation ? 'Detecting...' : loc.currentAddress,
+            loc.isLoading ? 'Detecting...' : loc.userAddress,
             Icons.person_pin_circle_outlined,
             AppTheme.accent,
           ),
           const SizedBox(height: 10),
           _locationRow(
             'Restaurant',
-            'FoodieHub Kitchen, Bandra West',
+            'FoodRush Kitchen, Bandra West',
             Icons.storefront_outlined,
             AppTheme.primary,
           ),
@@ -163,13 +186,13 @@ class ProfileScreen extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _statItem('Distance', loc.formattedDistance, Icons.straighten_rounded),
+                _statItem('Distance', distanceText, Icons.straighten_rounded),
                 _verticalDivider(),
-                _statItem('Est. Time', loc.estimatedTime, Icons.access_time_rounded),
+                _statItem('Est. Time', etaText, Icons.access_time_rounded),
                 _verticalDivider(),
                 _statItem(
                   'Delivery',
-                  loc.distanceKm != null && loc.totalAmount > 500 ? 'FREE' : '₹40',
+                  isFreeDelivery ? 'FREE' : '₹40',
                   Icons.delivery_dining_rounded,
                 ),
               ],
@@ -179,10 +202,6 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
   }
-
-  // Property needed to access totalAmount from LocationProvider is not available
-  // so using a Consumer workaround
-  double get totalAmount => 0;
 
   Widget _locationRow(String label, String value, IconData icon, Color color) {
     return Row(
@@ -242,8 +261,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildMenuSection(
-      BuildContext context, AuthProvider auth, LocationProvider loc) {
+  Widget _buildMenuSection(BuildContext context, user) {
+    final email = user?.email ?? '';
+    const errorColor = Color(0xFFD32F2F);
+
     return Column(
       children: [
         _menuItem(Icons.receipt_long_rounded, 'My Orders', 'View order history', () {}),
@@ -251,13 +272,13 @@ class ProfileScreen extends StatelessWidget {
         _menuItem(Icons.payment_outlined, 'Payment Methods', 'Cards, UPI & more', () {}),
         _menuItem(Icons.local_offer_outlined, 'Offers & Coupons', 'Save on your next order', () {}),
         _menuItem(Icons.help_outline_rounded, 'Help & Support', 'FAQs and customer service', () {}),
-        _menuItem(Icons.info_outline_rounded, 'About FoodieHub', 'Version 1.0.0', () {}),
+        _menuItem(Icons.info_outline_rounded, 'About FoodRush', 'Version 1.0.0', () {}),
         const SizedBox(height: 8),
         _menuItem(
           Icons.logout_rounded,
           'Sign Out',
-          'Logged in as ${auth.userEmail}',
-          () => _confirmLogout(context, auth),
+          email.isNotEmpty ? 'Logged in as $email' : 'Sign out of your account',
+          () => _confirmLogout(context),
           isDestructive: true,
         ),
       ],
@@ -271,11 +292,13 @@ class ProfileScreen extends StatelessWidget {
     VoidCallback onTap, {
     bool isDestructive = false,
   }) {
-    final color = isDestructive ? AppTheme.error : AppTheme.primary;
+    const errorColor = Color(0xFFD32F2F);
+    final color = isDestructive ? errorColor : AppTheme.primary;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: AppTheme.surface,
+        color: AppTheme.cardBg,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           onTap: onTap,
@@ -302,9 +325,7 @@ class ProfileScreen extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: isDestructive
-                              ? AppTheme.error
-                              : AppTheme.textPrimary,
+                          color: isDestructive ? errorColor : AppTheme.textPrimary,
                         ),
                       ),
                       Text(
@@ -318,7 +339,7 @@ class ProfileScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(
+                const Icon(
                   Icons.chevron_right_rounded,
                   color: AppTheme.textLight,
                   size: 20,
@@ -331,7 +352,8 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _confirmLogout(BuildContext context, AuthProvider auth) {
+  void _confirmLogout(BuildContext context) {
+    const errorColor = Color(0xFFD32F2F);
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -341,18 +363,19 @@ class ProfileScreen extends StatelessWidget {
         content: const Text('Are you sure you want to sign out?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () {
-              auth.logout();
+              context.read<AuthBloc>().add(AuthLogoutRequested());
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
                 (_) => false,
               );
             },
             child: const Text('Sign Out',
-                style: TextStyle(color: AppTheme.error)),
+                style: TextStyle(color: errorColor)),
           ),
         ],
       ),
